@@ -8,11 +8,9 @@ var aoi = ee.Geometry.Polygon([[[-90.04048449840815, 36.736785343208915],
 Map.style().set('cursor', 'crosshair');
 Map.centerObject(aoi, 10);
 
+// Add a title to the map.
 var title = ui.Label('Crop type classification in Missouri, United States', {
-  stretch: 'horizontal',
-  textAlign: 'center',
-  fontWeight: 'bold',
-  fontSize: '16px'
+  stretch: 'horizontal', textAlign: 'center', fontWeight: 'bold', fontSize: '16px'
 });
 Map.add(title);
 
@@ -99,9 +97,7 @@ var masks2clouds = function(image){
   // Merging the masks together
   var cloud_mask = cloud_shadow.add(cloud_low).add(cloud_medium).add(cloud_high);
   // Creating a uniary mask image from the binary mask image i.e. replacing the black with nulls
-  var cloud_uni = cloud_mask.eq(0).selfMask(); //0 are cloud less features while 1 is cloud and 
-                                              //...cloud shadow. SelfMask is added to ignore 0
-                                              //if you want inverted mask set the bit value to 0
+  var cloud_uni = cloud_mask.eq(0).selfMask();
   // Finally masking the orignal image (or bands) with cloud mask
   return image.updateMask(cloud_uni).copyProperties(image);
 };
@@ -197,7 +193,6 @@ Map.addLayer(mosaiced_2019.median(), rgbVis, 'S2 surface reflectance for 2019 ma
 // Radar imagery has been proven useful as an adittion in landcover classification
 // SAR processing functions for Sentinel-1 data from S. BUCHELT & T. ULLMANN 2022
 // https://code.earthengine.google.com/171f947ac683a70e9af87a226f7db997
-// add the other orbit mode
 var selectedOrbitMode = 'ASCENDING';
 var resampleSize = 10;
 var specklefilterSize = 15;
