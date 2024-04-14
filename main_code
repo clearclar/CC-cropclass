@@ -1,8 +1,20 @@
 // Ways for the analysis of AGRICULTURAL FIELDS IN GOOGLE EARTH ENGINE
-
 // 0 SCRIPT SETUP
+var aoi = ee.Geometry.Polygon([[[-90.04048449840815, 36.736785343208915],
+          [-90.04048449840815, 36.43685428807831],
+          [-89.6916685804394, 36.43685428807831],
+          [-89.6916685804394, 36.736785343208915]]], null, false);
+
 Map.style().set('cursor', 'crosshair');
 Map.centerObject(aoi, 10);
+
+var title = ui.Label('Crop type classification in Missouri, United States', {
+  stretch: 'horizontal',
+  textAlign: 'center',
+  fontWeight: 'bold',
+  fontSize: '16px'
+});
+Map.add(title);
 
 // Political boundaries of Missouri.
 var Missouri = ee.FeatureCollection("FAO/GAUL/2015/level1").filter('ADM1_NAME == "Missouri"');
@@ -50,11 +62,14 @@ var croplandList = ee.List(['2019', '2023']).map(function(year){
 
 print('Total area of agricultural fields within the area of interest in km^2:', ee.Image(croplandList.get(0)).geometry().area().divide(1000000));
 Map.addLayer(ee.Image(croplandList.get(0)), {}, 'US cropland 2019');
-Map.addLayer(ee.Image(croplandList.get(1)), {}, 'US cropland 2023');
+Map.addLayer(ee.Image(croplandList.get(1)), {}, 'US cropland 2023', false);
+
+// create a binary layer for cotton and non-cotton fields.
+var UScotton_2019 = ee.Image(croplandList.get(0)).eq(2);
 
 // 2 DATA IMPORT AND PROCESSING
 // 2019 was selected as year of interest. 
-// May to November are the months of main activity for cotton.
+// May to November are the months of main growing activity for cotton.
 var startMonth = 5;
 var endMonth = 11;
 var year = 2019;
@@ -74,7 +89,6 @@ function maskEdges(s2_img) {
 }
 
 // 2nd type of cloud-masking, function for masking clouds and cloud shadow
-// useful?
 var masks2clouds = function(image){
   var scl = image.select('SCL');
   // Selecting the cloud shadow and cloud masks (3,7,8,9);
@@ -92,13 +106,12 @@ var masks2clouds = function(image){
   return image.updateMask(cloud_uni).copyProperties(image);
 };
 
-// IMAGE-COLLECTION FILTERING
 // Filter input collections by desired data range and region.
 var col_criteria = ee.Filter.and(
     ee.Filter.bounds(aoi),
     ee.Filter.calendarRange(startMonth,endMonth,'month'));
 
-// SPECTRAL INDICES
+// Apply indices.
 function addNDVI(image){
   var nd = image.normalizedDifference(['B8', 'B4']).rename('NDVI');
   return image.addBands(nd);
@@ -115,27 +128,22 @@ function addBSI(image){
     }).divide(10000).rename('BSI') 
     )}
 
+// Function to mosaic images of the same date.
 function mosaicByDate(imcol){
-  // imcol: An image collection
-  // returns: An image collection
   var imlist = imcol.toList(imcol.size());
-
   var unique_dates = imlist.map(function(im){
     return ee.Image(im).date().format("YYYY-MM-dd");
   }).distinct();
-
   var mosaic_imlist = unique_dates.map(function(d){
     d = ee.Date(d);
-
     var im = imcol
       .filterDate(d, d.advance(1, "day"))
       .mosaic();
-      
-        return im.set(
-        "system:time_start", d.millis(), 
-        "system:id", d.format("YYYY-MM-dd"), 
-        "system:index", d.format("YYYY-MM-dd"));
-  });
+    return im.set(
+      "system:time_start", d.millis(), 
+      "system:id", d.format("YYYY-MM-dd"), 
+      "system:index", d.format("YYYY-MM-dd"));
+    });
   return ee.ImageCollection(mosaic_imlist);
 }
 
@@ -145,9 +153,9 @@ var classVis = {min: 0, max: 1, palette: ['blue' ,'red']};
 // Visualisation parameters for an RGB image.
 var rgbVis = {bands:['B4', 'B3', 'B2'], min:0, max:3000};
 
+// 2.1 OPTICAL IMAGERY
 // apply cloud masking based on the Sentinel-2 cloud probability product by Copernicus
 // code source: https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_CLOUD_PROBABILITY
-
 // maximum cloud probability set to 65%
 var MAX_CLOUD_PROBABILITY = 65;
 
@@ -169,6 +177,8 @@ var S2combined_cloud = ee.Join.saveFirst('cloud_mask').apply({
       ee.Filter.equals({leftField: 'system:index', rightField: 'system:index'})
 });
 
+// Filter collection for cloudy pixel percentage, add a second cloud masking algorithm,
+// add an NDVI band and a BSI band, then clip to the area of interest.
 var S2_cloud_masked = ee.ImageCollection(S2combined_cloud)
   .map(mask_clouds)
   .filter(ee.Filter.lte('CLOUDY_PIXEL_PERCENTAGE', 25))
@@ -179,10 +189,11 @@ var S2_cloud_masked = ee.ImageCollection(S2combined_cloud)
     return image.clip(aoi);
   });
 
+// mosaic the images in the collection by date and select only the spectral bands, BSI and NDVI.
 var mosaiced_2019 = mosaicByDate(S2_cloud_masked).select(['B.*', 'NDVI']);
-var UScotton_2019 = ee.Image(croplandList.get(0)).eq(2);
 Map.addLayer(mosaiced_2019.median(), rgbVis, 'S2 surface reflectance for 2019 masked at ' + MAX_CLOUD_PROBABILITY + '%', false);
 
+// 2.2 RADAR IMAGERY
 // Radar imagery has been proven useful as an adittion in landcover classification
 // SAR processing functions for Sentinel-1 data from S. BUCHELT & T. ULLMANN 2022
 // https://code.earthengine.google.com/171f947ac683a70e9af87a226f7db997
@@ -329,7 +340,7 @@ var non_cotton_chart = ui.Chart.image.series({
       },
     });
 
-// Print the chartS
+// Print the charts
 print('Charts, visualizing median backscatter over cotton and\nnon-cotton fields for VV and VH polarization',
   cotton_chart, non_cotton_chart);
 
@@ -424,8 +435,9 @@ var img_with = mosaiced_2019.filter(ee.Filter.calendarRange(7,7, 'month')).media
 var label = 'lc';
 var lc = UScotton_2019.rename(label).toByte();
 
-// Add land cover as a band of the reflectance image and sample 100 pixels at
-// 10 m scale from each land cover class within a region of interest.
+// Classification without Sentinel-1 data.
+// Add crop type as a band and sample 200 pixels at 10 m scale 
+// from each land cover class within the aoi.
 var sample = img_without.addBands(lc).stratifiedSample({
   numPoints: 200,
   classBand: label,
@@ -452,11 +464,11 @@ var trainedClassifier = ee.Classifier.smileRandomForest(10).train({
 print('Results of trained classifier without S1 data', trainedClassifier.explain());
 // Get overall accuracy for the S1 training sample.
 var trainAccuracy = trainedClassifier.confusionMatrix();
-print('Training overall accuracy without S1 data', trainAccuracy.accuracy());
 // Get overall accuracy for the validation sample.
 validationSample = validationSample.classify(trainedClassifier);
 var validationAccuracy = validationSample.errorMatrix(label, 'classification');
-print('Validation accuracy without S1 data', validationAccuracy.accuracy());
+print('Training overall accuracy without S1 data', trainAccuracy.accuracy(), '',
+  'Validation accuracy without S1 data', validationAccuracy.accuracy());
 
 // Classify the reflectance image from the trained classifier.
 var imgClassified = img_without.classify(trainedClassifier);
@@ -464,8 +476,6 @@ var imgClassified = img_without.classify(trainedClassifier);
 Map.addLayer(imgClassified, classVis, 'Classified cotton fields without S1 data');
 
 // Classification including S1 data
-// Add land cover as a band of the reflectance image and sample 100 pixels at
-// 10 m scale from each land cover class within a region of interest.
 var sample = img_with.addBands(lc).stratifiedSample({
   numPoints: 200,
   classBand: label,
@@ -493,22 +503,13 @@ print('Results of trained classifier with S1 data', trainedClassifier.explain())
 
 // Get overall accuracy for the training sample.
 var trainAccuracy = trainedClassifier.confusionMatrix();
-print('Training overall accuracy with S1 data', trainAccuracy.accuracy());
 // Get overall accuracy for the validation sample.
 validationSample = validationSample.classify(trainedClassifier);
 var validationAccuracy = validationSample.errorMatrix(label, 'classification');
-print('Validation accuracy with S1 data', validationAccuracy.accuracy());
+print('Training overall accuracy with S1 data', trainAccuracy.accuracy(), '',
+  'Validation accuracy with S1 data', validationAccuracy.accuracy());
 
 // Classify the reflectance image from the trained classifier.
 var imgClassified = img_with.classify(trainedClassifier);
 
 Map.addLayer(imgClassified, classVis, 'Classified cotton fields with S1 data');
-
-// 99 TITLE
-var title = ui.Label('Crop type classification in Missouri, United States', {
-  stretch: 'horizontal',
-  textAlign: 'center',
-  fontWeight: 'bold',
-  fontSize: '16px'
-});
-Map.add(title);
