@@ -1,5 +1,6 @@
 # CC-cropclass
 Cloud Computing project for crop classification over Missouri
+https://code.earthengine.google.com/897df8d5243736ee5a588b099503c210
 
 ## Background
 Crop classification and the detection of crop phenological cycles is one of the many possibilities of satellite remote sensing for agricultural areas. The reflectence of different spectra changes over the course of the year, revealing information about plant growth stages and thus characteristics of different plant types, which can be used for crop classification.
