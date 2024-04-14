@@ -1,63 +1,64 @@
-// RANDOM FOREST FOR COTTON FIELDS
-// TREND ANALYSIS AND SEE IF TREND REFLECTED BY CLASSIFICATION
+// Ways for the analysis of AGRICULTURAL FIELDS IN GOOGLE EARTH ENGINE
 
-// SETUP
+// 0 SCRIPT SETUP
 Map.style().set('cursor', 'crosshair');
-Map.centerObject(aoi, 10)
+Map.centerObject(aoi, 10);
 
-// DEFINE TIME SPAN
-var startMonth = 7;
-var endMonth = 11;
-var year = 2019;
+// Political boundaries of Missouri.
+var Missouri = ee.FeatureCollection("FAO/GAUL/2015/level1").filter('ADM1_NAME == "Missouri"');
 
-// POLITICAL BOUNDARIES FOR REGION OF INTEREST
-var USA = ee.FeatureCollection("FAO/GAUL/2015/level1").filter('ADM0_NAME == "United States of America"');
-var Missouri = USA.filter('ADM1_NAME == "Missouri"');
-
-// LANDCOVER LAYERS FOR COTTON FIELD MASK
+// ESA landcover product for masking the croptype layer to only agricultural fields.
 var ESAlandcover = ee.Image('ESA/WorldCover/v100/2020');
-var UScropland = ee.ImageCollection('USDA/NASS/CDL')
-                  .filter(ee.Filter.date(year+'-01-01', year+'-12-31'))
-                  .first()
-                  .select('cropland')
-                  .clip(Missouri)
-                  .updateMask(ESAlandcover.eq(40));
-print(UScropland, 'UScropland')
-Map.addLayer(UScropland, {}, 'US cropland')
 
-// Create time-series chart
-var my_chart = ui.Chart.image.series({
+// 1 CROPTYPE PRODUCTS AND TREND ANALYSIS
+// Time series chart and trend line of cotton field area within the area of interest 
+// show that cotton field area stayed relatively stable since 2001.
+var trend_chart = ui.Chart.image.series({
   imageCollection: ee.ImageCollection('USDA/NASS/CDL')
     .filter(ee.Filter.calendarRange(2001, 2023, 'year'))
     .select('cropland').map(function(image){
-    return image.addBands(ee.Image.pixelArea().divide(1000000)).updateMask(image.eq(2))
+    return image.addBands(ee.Image.pixelArea().divide(1000000)).updateMask(image.eq(2));
   }).select('area'),
   region: aoi,
-reducer: ee.Reducer.sum(),
-scale: 30
-})
-.setChartType('ScatterChart')
-.setOptions({
-title: 'Annual cotton area for the area of interest in Minnesota',
-vAxis: {title: 'Cotton area [sq km]'},
-hAxis: {title: 'Year'},
-pointSize: 2,
-lineSize: 1,
-trendlines: {0: {color: 'red'}}
+  reducer: ee.Reducer.sum(),
+  scale: 30
+}).setChartType('ScatterChart')
+  .setOptions({
+    title: 'Annual cotton area for the area of interest in Minnesota',
+    vAxis: {title: 'Cotton area [sq km]'},
+    hAxis: {title: 'Year'},
+    pointSize: 2,
+    lineSize: 1,
+    trendlines: {0: {color: 'red'}}
+
+  });
+
+print('Annual cotton area for the area of interest\nin Minnesota from 2001 to 2023', trend_chart, 'Cotton field area decreased slightly\nby around -1.8 km^2 per year');
+
+// Add croptype classification for 2019 and 2023 to the map.
+// Switching the layers on and off visualizes changes between the years
+var croplandList = ee.List(['2019', '2023']).map(function(year){
+  var UScropland = ee.ImageCollection('USDA/NASS/CDL')
+                    .filterDate(ee.Date(year), ee.Date(year).advance(1, 'year'))
+                    .first()
+                    .select('cropland')
+                    .clip(aoi)
+                    .updateMask(ESAlandcover.eq(40));
+  
+  return UScropland;
 });
-print(my_chart);
 
-var UScotton = UScropland.eq(2);
+print('Total area of agricultural fields within the area of interest in km^2:', ee.Image(croplandList.get(0)).geometry().area().divide(1000000));
+Map.addLayer(ee.Image(croplandList.get(0)), {}, 'US cropland 2019');
+Map.addLayer(ee.Image(croplandList.get(1)), {}, 'US cropland 2023');
 
-// SIEVE LANDCOVER MASK TO REMOVE AREAS < 10 PIXELS (8-CONNECTEDNESS SET TO TRUE)
-var minPixels = 10
-var count = UScotton.connectedPixelCount(minPixels)
-var UScotton_sieved = UScotton
-  .where(count.lt(minPixels), UScotton.not())
-Map.addLayer(UScotton_sieved, {}, 'US cotton fields sieved', false)
+// 2 DATA IMPORT AND PROCESSING
+// 2019 was selected as year of interest. 
+// May to November are the months of main activity for cotton.
+var startMonth = 5;
+var endMonth = 11;
+var year = 2019;
 
-// DEFINE FUNCTIONS
-// CLOUD MASKING
 // Function for single image cloud masking.
 function mask_clouds(img) {
   var clouds = ee.Image(img.get('cloud_mask')).select('probability');
@@ -89,7 +90,7 @@ var masks2clouds = function(image){
                                               //if you want inverted mask set the bit value to 0
   // Finally masking the orignal image (or bands) with cloud mask
   return image.updateMask(cloud_uni).copyProperties(image);
-}
+};
 
 // IMAGE-COLLECTION FILTERING
 // Filter input collections by desired data range and region.
@@ -113,55 +114,6 @@ function addBSI(image){
       'B2': image.select('B2'),
     }).divide(10000).rename('BSI') 
     )}
-
-// VISUALISATION PARAMETERS
-// Visualisation parameters for the classified image.
-var classVis = {min: 0, max: 1, palette: ['blue' ,'red']};
-// Visualisation parameters for an RGB image.
-var rgbVis = {bands:['B4', 'B3', 'B2'], min:0, max:3000}
-
-// IMPORT AND VISUALIZE OPTICAL IMAGERY FOR THE AREA OF INTEREST
-// apply cloud masking based on the s2 cloud probability product by xy
-// maximum cloud probability set to 65%
-// code source: https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_CLOUD_PROBABILITY
-var MAX_CLOUD_PROBABILITY = 65;
-
-// define Sentinel-2 image collections
-var S2collection = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-  .filter(col_criteria)
-  .filter(ee.Filter.date(year+'-01-01',year+'-12-31'))
-  .map(maskEdges);
-print(S2collection, 'S2collection')
-var S2cloud_collection = ee.ImageCollection('COPERNICUS/S2_CLOUD_PROBABILITY')
-  .filter(col_criteria)
-  .filter(ee.Filter.date(year+'-01-01',year+'-12-31'));
-print(S2cloud_collection, 'S2cloud_collection')
-
-// Join S2 SR with cloud probability dataset to add cloud mask.
-var S2combined_cloud = ee.Join.saveFirst('cloud_mask').apply({
-  primary: S2collection,
-  secondary: S2cloud_collection,
-  condition:
-      ee.Filter.equals({leftField: 'system:index', rightField: 'system:index'})
-});
-
-var S2_cloud_masked = ee.ImageCollection(S2combined_cloud).map(mask_clouds);
-
-Map.addLayer(
-    S2_cloud_masked.median(), rgbVis, 'S2 SR masked at ' + MAX_CLOUD_PROBABILITY + '%',
-    false);
-
-// VISUALIZE COTTON PHENOLOGY USING A GIF
-S2_cloud_masked = S2_cloud_masked
-  .filter(ee.Filter.lte('CLOUDY_PIXEL_PERCENTAGE', 25))
-  .map(masks2clouds)
-  .map(addNDVI)
-  .map(addBSI)
-  .map(function(image){
-    return image.clip(aoi)
-  })
-  //.select(['B2', 'B3', 'B4'])
-  ;
 
 function mosaicByDate(imcol){
   // imcol: An image collection
@@ -187,82 +139,55 @@ function mosaicByDate(imcol){
   return ee.ImageCollection(mosaic_imlist);
 }
 
-var mosaiced = mosaicByDate(S2_cloud_masked);
-print(mosaiced);
+// Visualisation parameters for the classified image.
+var classVis = {min: 0, max: 1, palette: ['blue' ,'red']};
 
-// Create RGB visualization images for use as animation frames.
-var S2Vis = mosaiced.map(function(img) {
-  return img.visualize(rgbVis).updateMask(UScotton.eq(1))
+// Visualisation parameters for an RGB image.
+var rgbVis = {bands:['B4', 'B3', 'B2'], min:0, max:3000};
+
+// apply cloud masking based on the Sentinel-2 cloud probability product by Copernicus
+// code source: https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_CLOUD_PROBABILITY
+
+// maximum cloud probability set to 65%
+var MAX_CLOUD_PROBABILITY = 65;
+
+// define Sentinel-2 image collection
+var S2collection = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+  .filter(col_criteria)
+  .filterDate(year+'-01-01',year+'-12-31')
+  .map(maskEdges);
+
+var S2cloud_collection = ee.ImageCollection('COPERNICUS/S2_CLOUD_PROBABILITY')
+  .filter(col_criteria)
+  .filterDate(year+'-01-01',year+'-12-31');
+
+// Join S2 SR with cloud probability dataset to add cloud mask.
+var S2combined_cloud = ee.Join.saveFirst('cloud_mask').apply({
+  primary: S2collection,
+  secondary: S2cloud_collection,
+  condition:
+      ee.Filter.equals({leftField: 'system:index', rightField: 'system:index'})
 });
-print('rgbVis',S2Vis)
 
-// Define GIF visualization parameters.
-var gifParams = {
-  'region': aoi,
-  'dimensions': 600,
-  'crs': 'EPSG:3857',
-  'framesPerSecond': 1//,  'format': 'gif'
-};
+var S2_cloud_masked = ee.ImageCollection(S2combined_cloud)
+  .map(mask_clouds)
+  .filter(ee.Filter.lte('CLOUDY_PIXEL_PERCENTAGE', 25))
+  .map(masks2clouds)
+  .map(addNDVI)
+  .map(addBSI)
+  .map(function(image){
+    return image.clip(aoi);
+  });
 
-// Print the GIF URL to the console.
-print(S2Vis.getVideoThumbURL(gifParams));
+var mosaiced_2019 = mosaicByDate(S2_cloud_masked).select(['B.*', 'NDVI']);
+var UScotton_2019 = ee.Image(croplandList.get(0)).eq(2);
+Map.addLayer(mosaiced_2019.median(), rgbVis, 'S2 surface reflectance for 2019 masked at ' + MAX_CLOUD_PROBABILITY + '%', false);
 
-// Render the GIF animation in the console.
-print(ui.Thumbnail(S2Vis, gifParams));
-
-
-
-var ndvi_palette = 'FFFFFF, CE7E45, DF923D, F1B555, FCD163, 99B718, 74A901, 66A000, 529400, ' + '3E8601, 207401, 056201, 004C00, 023B01, 012E01, 011D01, 011301';
-
-// Create RGB visualization images for use as animation frames.
-var NDVIVis = mosaiced.map(function(img) {
-  return img.visualize({bands:['NDVI'], min:0, max:1, palette: ndvi_palette})
-});
-print('rgbVis',NDVIVis)
-
-// Define GIF visualization parameters.
-var gifParams = {
-  'region': aoi,
-  'dimensions': 600,
-  'crs': 'EPSG:3857',
-  'framesPerSecond': 1//,  'format': 'gif'
-};
-
-// Print the GIF URL to the console.
-print(NDVIVis.getVideoThumbURL(gifParams));
-
-// Render the GIF animation in the console.
-print(ui.Thumbnail(NDVIVis, gifParams));
-
-
-
-// Create RGB visualization images for use as animation frames.
-var BSIVis = mosaiced.map(function(img) {
-  return img.visualize({bands:['BSI'], min:0, max:1
-  })
-});
-print('rgbVis',BSIVis)
-
-// Define GIF visualization parameters.
-var gifParams = {
-  'region': aoi,
-  'dimensions': 600,
-  'crs': 'EPSG:3857',
-  'framesPerSecond': 1//,  'format': 'gif'
-};
-
-// Print the GIF URL to the console.
-print(BSIVis.getVideoThumbURL(gifParams));
-
-// Render the GIF animation in the console.
-print(ui.Thumbnail(BSIVis, gifParams));
-
-// Sentinel-1
-// SAR processing functions from S. BUCHELT & T. ULLMANN 2022
+// Radar imagery has been proven useful as an adittion in landcover classification
+// SAR processing functions for Sentinel-1 data from S. BUCHELT & T. ULLMANN 2022
 // https://code.earthengine.google.com/171f947ac683a70e9af87a226f7db997
 // add the other orbit mode
 var selectedOrbitMode = 'ASCENDING';
-print('Selected orbit mode:', selectedOrbitMode);
 var resampleSize = 10;
 var specklefilterSize = 15;
 
@@ -275,7 +200,7 @@ function toDB(img) {
   return ee.Image(img).log10().multiply(10.0).copyProperties(img).copyProperties(img, ['system:time_start']);
 }
 
-// MEDIAN FILTER
+// Median filter.
 var filterSpeckles = function(img) {
   var smoothed = img.focal_median(specklefilterSize,'square','meters'); 
   return smoothed.copyProperties(img).copyProperties(img, ['system:time_start']);
@@ -288,23 +213,19 @@ var resample = function(image) {
   return resampled;
 };
 
-//---------------------------------------------------------------------------//
-// Additional Border Noise Removal
-//---------------------------------------------------------------------------//
-/** (mask out angles >= 45.23993) */
+// Additional Border Noise Removal (mask out angles >= 45.23993).
 var maskAngLT452 = function(image) {
  var ang = image.select(['angle']);
  return image.updateMask(ang.lt(45.23993)).set('system:time_start', image.get('system:time_start'));
 };
 
-/** Function to mask out edges of images using angle.
- * (mask out angles <= 30.63993) */
+// Function to mask out edges of images using angle (mask out angles <= 30.63993).
 var maskAngGT30 = function(image) {
  var ang = image.select(['angle']);
  return image.updateMask(ang.gt(30.63993)).set('system:time_start', image.get('system:time_start'));
 };
 
-/** Remove edges.*/
+// Remove edges.
 var maskEdge = function(image) {
   var mask = image.select(0).unitScale(-25, 5).multiply(255).toByte();
   return image.updateMask(mask.select(0)).set('system:time_start', image.get('system:time_start'));  
@@ -320,6 +241,7 @@ var border_noise_removal = function (collection){
   return collection.map(f_mask_edges);
 };
 
+// Determine the possible relative orbits and select the first one for consistency.
 var imgVV = ee.ImageCollection('COPERNICUS/S1_GRD')
   .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
   .filter(ee.Filter.eq('instrumentMode', 'IW'))
@@ -329,97 +251,182 @@ imgVV = imgVV.select('VV', 'angle')
   .filterBounds(aoi)
   .filterDate(year+'-01-01',year+'-12-31');
 var relativeOrbits = ee.List(imgVV.aggregate_array("relativeOrbitNumber_stop").distinct());
-print("relativeOrbits", relativeOrbits);
+var relOrb = relativeOrbits.get(0);
 
+var imgVV_VH = ee.ImageCollection('COPERNICUS/S1_GRD')
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
+  .filter(ee.Filter.eq('instrumentMode', 'IW'))
+  .filter(ee.Filter.eq('orbitProperties_pass', selectedOrbitMode))
+  .filter(ee.Filter.eq('resolution', 'H'))
+  .filter(ee.Filter.eq('relativeOrbitNumber_stop', relOrb))
+  .select('VV','VH' , 'angle')
+  .filterBounds(aoi)
+  .filterDate(year+'-01-01',year+'-12-31');
 
-var s1_processed = relativeOrbits.map(function(relOrb){
-  relOrb = ee.Number(relOrb);
+// Border noise removal.
+imgVV_VH = border_noise_removal(imgVV_VH);
 
-  var imgVV_VH = ee.ImageCollection('COPERNICUS/S1_GRD')
-  // do i need this?
-    .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
-    .filter(ee.Filter.eq('instrumentMode', 'IW'))
-    .filter(ee.Filter.eq('orbitProperties_pass', selectedOrbitMode))
-    .filter(ee.Filter.eq('resolution', 'H'))
-    .filter(ee.Filter.eq('relativeOrbitNumber_stop', relOrb))
-    .select('VV','VH' , 'angle')
-    .filterBounds(aoi)
-    .filterDate(year+'-01-01',year+'-12-31');
+// Convert to linear.
+imgVV_VH = imgVV_VH.map(toNatural);
+// MEDIAN FILTER
+imgVV_VH = imgVV_VH.map(filterSpeckles);
 
-  // BORDER NOISE REMOVAL
-  imgVV_VH = border_noise_removal(imgVV_VH);
-  
-  // CONVERT TO LINEAR
-  imgVV_VH = imgVV_VH.map(toNatural);
-  // MEDIAN FILTER
-  imgVV_VH = imgVV_VH.map(filterSpeckles);
-  
-  // RESAMPLE TO NEW PIXEL SIZE
-  imgVV_VH = imgVV_VH.map(resample);
-  
-  // CONVERT BACK TO DB
-  imgVV_VH = imgVV_VH.map(toDB);
-  
-  // MOSAIC
-  imgVV_VH = mosaicByDate(imgVV_VH);
-  
-  //RENAME BANDS
-  var collections1 = imgVV_VH
-    //.map(addDate)
-    .map(function(img){
-      var named = img.rename(['VV', 'VH']);
-        return named})
-    .map(function(image){
-      return image.set('relativeOrbit', relOrb);
-    })
-;
-  
-  return collections1;
-});
+// Resample to new pixel size.
+imgVV_VH = imgVV_VH.map(resample);
 
-var s1_processed_collection = ee.ImageCollection(s1_processed.get(0))
-  .map(function(image){
-    return image.clip(aoi)
+// Convert back to dB.
+imgVV_VH = imgVV_VH.map(toDB);
+
+// Mosaic.
+imgVV_VH = mosaicByDate(imgVV_VH);
+
+var s1_processed_collection = imgVV_VH.map(function(image){
+    return image.clip(aoi);
   });
 
-print(s1_processed_collection, 'S1 image collection');
 Map.addLayer(s1_processed_collection.median().select('VH'), {min:-30, max:0}, 'S1 median 2019 VH', 0);
 Map.addLayer(s1_processed_collection.median().select('VV'), {min:-30, max:0}, 'S1 median 2019 VV', 0);
 
+// cotton chart for S1 data
+var cotton_chart = ui.Chart.image.series({
+  imageCollection: s1_processed_collection.map(function(image){
+    return image.updateMask(UScotton_2019.eq(1));
+  }),
+  region: aoi,
+  reducer: ee.Reducer.median(),
+  scale: 20,
+}).setChartType('LineChart')
+  .setOptions({
+      lineWidth: 1,
+      pointSize: 2,
+      title: 'Cotton field backscatter over time',
+      vAxis: {title: 'backscatter intensity [dB]'},
+      hAxis: {title: '', format: 'YYYY-MMM', gridlines: {count: 12}},
+      series: {
+        0: {color: 'red'},
+        1: {color: 'blue'}
+      },
+    });
 
+// non-cotton chart for S1 data
+var non_cotton_chart = ui.Chart.image.series({
+  imageCollection: s1_processed_collection.map(function(image){
+    return image.updateMask(UScotton_2019.eq(0));
+  }),
+  region: aoi,
+  reducer: ee.Reducer.median(),
+  scale: 20,
+}).setChartType('LineChart')
+  .setOptions({
+      lineWidth: 1,
+      pointSize: 2,
+      title: 'Other crop backscatter over time',
+      vAxis: {title: 'backscatter intensity [dB]'},
+      hAxis: {title: '', format: 'YYYY-MMM', gridlines: {count: 12}},
+      series: {
+        0: {color: 'red'},
+        1: {color: 'blue'}
+      },
+    });
 
-// A Sentinel-2 surface reflectance image, reflectance bands selected,
-// serves as the source for training and prediction in this contrived example.
-var mosaiced1 = mosaiced.filter(ee.Filter.calendarRange(7,7, 'month'));
-var mosaiced2 = mosaiced.filter(ee.Filter.calendarRange(8,8, 'month'));
-var mosaiced3 = mosaiced.filter(ee.Filter.calendarRange(9,9, 'month'));
-var mosaiced4 = mosaiced.filter(ee.Filter.calendarRange(10,10, 'month'));
-var s1_processed_collection1 = s1_processed_collection.filter(ee.Filter.calendarRange(7,7, 'month'));
-var s1_processed_collection2 = s1_processed_collection.filter(ee.Filter.calendarRange(8,8, 'month'));
-var s1_processed_collection3 = s1_processed_collection.filter(ee.Filter.calendarRange(9,9, 'month'));
-var s1_processed_collection4 = s1_processed_collection.filter(ee.Filter.calendarRange(10,10, 'month'));
+// Print the chartS
+print('Charts, visualizing median backscatter over cotton and\nnon-cotton fields for VV and VH polarization',
+  cotton_chart, non_cotton_chart);
 
-/*var img = mosaiced.select(['B.*']).median()
-  .addBands(mosaiced.select('NDVI').median())
-  .addBands(s1_processed_collection.median());*/
+// 3 VISUALISATION OF SATELLITE IMAGERY SHOWS HOW SPECTRAL PROPERTIES CHANGE OVER THE COURSE OF THE YEAR
+// Define GIF visualization parameters.
+var gifParams = {
+  'region': aoi,
+  'dimensions': 300,
+  'crs': 'EPSG:3857',
+  'framesPerSecond': 1
+};
+
+var text_package = require('users/gena/packages:text'); // Import gena's package which allows text overlay on image
+var annotation_spot = ee.Geometry.Point([-90.01439196911146,36.46545857507958]);
+var annotations = [{position: 'top', offset: '1%', margin: '1%', property: 'system:index', scale: 250}]
   
-var img = mosaiced1.select(['B.*']).median()
-  .addBands(mosaiced1.select('NDVI').median())
-  .addBands(s1_processed_collection1.median())
-  .addBands(mosaiced2.select(['B.*']).median())
-  .addBands(mosaiced2.select('NDVI').median())
-  .addBands(s1_processed_collection2.median());
-  
-print(img, 'training image');
+function addText(image){
+  return text_package.annotateImage(image, {}, annotation_spot, annotations); 
+}
 
-// ESA WorldCover land cover map, used as label source in classifier training.
+// Create RGB visualization images for use as animation frames.
+var S2Vis = mosaiced_2019.map(function(img) {
+  return img.visualize(rgbVis);
+}).map(addText);
+
+// Print the GIF URL to the console.
+print('Link to GIF of S2 time series', S2Vis.getVideoThumbURL(gifParams));
+
+/// GIF button for Sentinel-2 GIF on Map
+var GIF_S2 = ui.Button({label: 'Create Sentinel-2 GIF 2019',
+  onClick: function GIF(){
+    Map.add(ui.Thumbnail({image: S2Vis, params: gifParams, style: {position: 'bottom-right'}}));
+    }, 
+  style: {position: 'top-right'}
+});
+Map.add(GIF_S2);
+
+// Create visualization for S1 images for use as animation frames.
+// Date annotation was not possible on radar images because of processing and memory capacities.
+var S1Vis_VV = s1_processed_collection.select('VV').map(function(img) {
+  return img.visualize({min:-15, max:-5});
+});
+
+// Print the GIF URL to the console.
+print('Link to GIF of S1 VV time series', S1Vis_VV.getVideoThumbURL(gifParams));
+
+/// GIF button for Sentinel-1 GIF on Map
+var GIF_S1_VV = ui.Button({label: 'Create Sentinel-1 VV GIF 2019',
+  onClick: function GIF(){
+    Map.add(ui.Thumbnail({image: S1Vis_VV, params: gifParams, style: {position: 'bottom-right'}}));
+    }, 
+  style: {position: 'top-right'}
+});
+Map.add(GIF_S1_VV);
+
+// Create visualization for S1 images for use as animation frames.
+var S1Vis_VH = s1_processed_collection.select('VH').map(function(img) {
+  return img.visualize({min:-25, max:-10});
+});
+
+// Print the GIF URL to the console.
+print('Link to GIF of S1 VH time series', S1Vis_VH.getVideoThumbURL(gifParams));
+
+/// GIF button for Sentinel-1 GIF on Map
+var GIF_S1_VH = ui.Button({label: 'Create Sentinel-1 VH GIF 2019',
+  onClick: function GIF(){
+    Map.add(ui.Thumbnail({image: S1Vis_VH, params: gifParams, style: {position: 'bottom-right'}}));
+    }, 
+  style: {position: 'top-right'}
+});
+Map.add(GIF_S1_VH);
+
+// 4 CROP CLASSIFICATION
+// Create an image for classification that contains one band for each month within the selected time frame in 2019.
+// An image including and one without Sentinel-1 imagery are created to enable comparison of the classification accuracy.
+// The images serve as the source for training and prediction.
+var img_without = mosaiced_2019.filter(ee.Filter.calendarRange(7,7, 'month')).median()
+  .addBands(mosaiced_2019.filter(ee.Filter.calendarRange(8,8, 'month')).median())
+  .addBands(mosaiced_2019.filter(ee.Filter.calendarRange(9,9, 'month')).median())
+  .addBands(mosaiced_2019.filter(ee.Filter.calendarRange(10,10, 'month')).median());
+
+var img_with = mosaiced_2019.filter(ee.Filter.calendarRange(7,7, 'month')).median()
+  .addBands(mosaiced_2019.filter(ee.Filter.calendarRange(8,8, 'month')).median())
+  .addBands(mosaiced_2019.filter(ee.Filter.calendarRange(9,9, 'month')).median())
+  .addBands(mosaiced_2019.filter(ee.Filter.calendarRange(10,10, 'month')).median())
+  .addBands(s1_processed_collection.filter(ee.Filter.calendarRange(7,7, 'month')).median())
+  .addBands(s1_processed_collection.filter(ee.Filter.calendarRange(8,8, 'month')).median())
+  .addBands(s1_processed_collection.filter(ee.Filter.calendarRange(9,9, 'month')).median())
+  .addBands(s1_processed_collection.filter(ee.Filter.calendarRange(10,10, 'month')).median());
+
+// Crop classification product used as label source in classifier training.
 var label = 'lc';
-
-var lc = UScotton_sieved.rename(label).toByte();
+var lc = UScotton_2019.rename(label).toByte();
 
 // Add land cover as a band of the reflectance image and sample 100 pixels at
 // 10 m scale from each land cover class within a region of interest.
-var sample = img.addBands(lc).stratifiedSample({
+var sample = img_without.addBands(lc).stratifiedSample({
   numPoints: 200,
   classBand: label,
   region: aoi,
@@ -434,305 +441,74 @@ sample = sample.randomColumn();
 var trainingSample = sample.filter('random <= 0.8');
 var validationSample = sample.filter('random > 0.8');
 
-print(sample, 'sample')
+// Train a 10-tree random forest classifier from the training sample.
+var trainedClassifier = ee.Classifier.smileRandomForest(10).train({
+  features: trainingSample,
+  classProperty: label,
+  inputProperties: img_without.bandNames(),
+});
+
+// Get information about the trained classifier.
+print('Results of trained classifier without S1 data', trainedClassifier.explain());
+// Get overall accuracy for the S1 training sample.
+var trainAccuracy = trainedClassifier.confusionMatrix();
+print('Training overall accuracy without S1 data', trainAccuracy.accuracy());
+// Get overall accuracy for the validation sample.
+validationSample = validationSample.classify(trainedClassifier);
+var validationAccuracy = validationSample.errorMatrix(label, 'classification');
+print('Validation accuracy without S1 data', validationAccuracy.accuracy());
+
+// Classify the reflectance image from the trained classifier.
+var imgClassified = img_without.classify(trainedClassifier);
+
+Map.addLayer(imgClassified, classVis, 'Classified cotton fields without S1 data');
+
+// Classification including S1 data
+// Add land cover as a band of the reflectance image and sample 100 pixels at
+// 10 m scale from each land cover class within a region of interest.
+var sample = img_with.addBands(lc).stratifiedSample({
+  numPoints: 200,
+  classBand: label,
+  region: aoi,
+  scale: 10,
+  geometries: true,
+  tileScale: 4
+});
+
+// Add a random value field to the sample and use it to approximately split 80%
+// of the features into a training set and 20% into a validation set.
+sample = sample.randomColumn();
+var trainingSample = sample.filter('random <= 0.8');
+var validationSample = sample.filter('random > 0.8');
 
 // Train a 10-tree random forest classifier from the training sample.
 var trainedClassifier = ee.Classifier.smileRandomForest(10).train({
   features: trainingSample,
   classProperty: label,
-  inputProperties: img.bandNames(),
+  inputProperties: img_with.bandNames(),
 });
 
 // Get information about the trained classifier.
-print('Results of trained classifier', trainedClassifier.explain());
+print('Results of trained classifier with S1 data', trainedClassifier.explain());
 
-// Get a confusion matrix and overall accuracy for the training sample.
+// Get overall accuracy for the training sample.
 var trainAccuracy = trainedClassifier.confusionMatrix();
-print('Training error matrix', trainAccuracy);
-print('Training overall accuracy', trainAccuracy.accuracy());
-
-// Get a confusion matrix and overall accuracy for the validation sample.
+print('Training overall accuracy with S1 data', trainAccuracy.accuracy());
+// Get overall accuracy for the validation sample.
 validationSample = validationSample.classify(trainedClassifier);
 var validationAccuracy = validationSample.errorMatrix(label, 'classification');
-print('Validation error matrix', validationAccuracy);
-print('Validation accuracy', validationAccuracy.accuracy());
+print('Validation accuracy with S1 data', validationAccuracy.accuracy());
 
 // Classify the reflectance image from the trained classifier.
-var imgClassified = img.classify(trainedClassifier).updateMask(UScotton_sieved.eq(1));
+var imgClassified = img_with.classify(trainedClassifier);
 
-//Map.setCenter(-122.184, 37.796, 12);
-Map.addLayer(lc, classVis, 'lc');
-Map.addLayer(imgClassified, classVis, 'Classified');
-Map.addLayer(trainingSample, {color: 'black'}, 'Training sample', false);
-Map.addLayer(validationSample, {color: 'white'}, 'Validation sample', false);
-Map.addLayer(aoi, {color:'white'}, 'Area of interest', false, 0.5)
+Map.addLayer(imgClassified, classVis, 'Classified cotton fields with S1 data');
 
-
-var classify = function(year){
-  var S2collection = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-    .filter(col_criteria)
-    .filter(ee.Filter.date(year+'-01-01',year+'-12-31'))
-    .map(maskEdges);
-  var S2cloud_collection = ee.ImageCollection('COPERNICUS/S2_CLOUD_PROBABILITY')
-    .filter(col_criteria)
-    .filter(ee.Filter.date(year+'-01-01',year+'-12-31'));
-  
-  // Join S2 SR with cloud probability dataset to add cloud mask.
-  var S2combined_cloud = ee.Join.saveFirst('cloud_mask').apply({
-    primary: S2collection,
-    secondary: S2cloud_collection,
-    condition:
-        ee.Filter.equals({leftField: 'system:index', rightField: 'system:index'})
-  });
-  
-  var S2_cloud_masked = ee.ImageCollection(S2combined_cloud).map(mask_clouds);
-  
-  S2_cloud_masked = S2_cloud_masked
-    .filter(ee.Filter.lte('CLOUDY_PIXEL_PERCENTAGE', 25))
-    .map(masks2clouds)
-    .map(addNDVI)
-    .map(addBSI)
-    .map(function(image){
-      return image.clip(aoi)
-    });
-  
-  function mosaicByDate(collection){
-    var imlist = collection.toList(collection.size());
-  
-    var unique_dates = imlist.map(function(im){
-      return ee.Image(im).date().format("YYYY-MM-dd");
-    }).distinct();
-  
-    var mosaic_imlist = unique_dates.map(function(d){
-      d = ee.Date(d);
-  
-      var im = collection
-        .filterDate(d, d.advance(1, "day"))
-        .mosaic();
-        
-          return im.set(
-          "system:time_start", d.millis(), 
-          "system:id", d.format("YYYY-MM-dd"), 
-          "system:index", d.format("YYYY-MM-dd"));
-    });
-    return ee.ImageCollection(mosaic_imlist);
-  }
-  
-  var mosaiced = mosaicByDate(S2_cloud_masked);
-  print(mosaiced);
-  
-  // Sentinel-1
-  // SAR processing functions from S. BUCHELT & T. ULLMANN 2022
-  // https://code.earthengine.google.com/171f947ac683a70e9af87a226f7db997
-  // add the other orbit mode
-  var selectedOrbitMode = 'ASCENDING';
-  print('Selected orbit mode:', selectedOrbitMode);
-  var resampleSize = 10;
-  var specklefilterSize = 15;
-  
-  // functions to convert from/to dB
-  function toNatural(img) {
-    var converted = ee.Image(10.0).pow(img.select([0,1]).divide(10.0));
-    return converted.copyProperties(img).copyProperties(img, ['system:time_start']).copyProperties(img, ['system:DOY']);
-  }
-  function toDB(img) {
-    return ee.Image(img).log10().multiply(10.0).copyProperties(img).copyProperties(img, ['system:time_start']);
-  }
-  
-  // MEDIAN FILTER
-  var filterSpeckles = function(img) {
-    var smoothed = img.focal_median(specklefilterSize,'square','meters'); 
-    return smoothed.copyProperties(img).copyProperties(img, ['system:time_start']);
-  };
-  
-  var resample = function(image) {
-    var epsg = imgVV.first().select(0).projection().crs();
-    var resampled = image.resample("bilinear")
-      .reproject({crs: epsg, scale: resampleSize});
-    return resampled;
-  };
-  
-  //---------------------------------------------------------------------------//
-  // Additional Border Noise Removal
-  //---------------------------------------------------------------------------//
-  /** (mask out angles >= 45.23993) */
-  var maskAngLT452 = function(image) {
-   var ang = image.select(['angle']);
-   return image.updateMask(ang.lt(45.23993)).set('system:time_start', image.get('system:time_start'));
-  };
-  
-  /** Function to mask out edges of images using angle.
-   * (mask out angles <= 30.63993) */
-  var maskAngGT30 = function(image) {
-   var ang = image.select(['angle']);
-   return image.updateMask(ang.gt(30.63993)).set('system:time_start', image.get('system:time_start'));
-  };
-  
-  /** Remove edges.*/
-  var maskEdge = function(image) {
-    var mask = image.select(0).unitScale(-25, 5).multiply(255).toByte();
-    return image.updateMask(mask.select(0)).set('system:time_start', image.get('system:time_start'));  
-  };
-  
-  var f_mask_edges = function(image) {
-    var output = maskAngGT30(image);
-    output = maskAngLT452(output);
-    return output;
-  };
-  
-  var border_noise_removal = function (collection){
-    return collection.map(f_mask_edges);
-  };
-  
-  var imgVV = ee.ImageCollection('COPERNICUS/S1_GRD')
-    .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
-    .filter(ee.Filter.eq('instrumentMode', 'IW'))
-    .filter(ee.Filter.eq('orbitProperties_pass', selectedOrbitMode))
-    .filter(ee.Filter.eq('resolution', 'H'));
-  imgVV = imgVV.select('VV', 'angle')
-    .filterBounds(aoi)
-    .filterDate(year+'-01-01',year+'-12-31');
-  var relativeOrbits = ee.List(imgVV.aggregate_array("relativeOrbitNumber_stop").distinct());
-  print("relativeOrbits", relativeOrbits);
-  
-  var relOrb = relativeOrbits.get(0)
-  var imgVV_VH = ee.ImageCollection('COPERNICUS/S1_GRD')
-  // do i need this?
-    .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
-    .filter(ee.Filter.eq('instrumentMode', 'IW'))
-    .filter(ee.Filter.eq('orbitProperties_pass', selectedOrbitMode))
-    .filter(ee.Filter.eq('resolution', 'H'))
-    .filter(ee.Filter.eq('relativeOrbitNumber_stop', relOrb))
-    .select('VV','VH' , 'angle')
-    .filterBounds(aoi)
-    .filterDate(year+'-01-01',year+'-12-31');
-
-  // BORDER NOISE REMOVAL
-  imgVV_VH = border_noise_removal(imgVV_VH);
-  
-  // CONVERT TO LINEAR
-  imgVV_VH = imgVV_VH.map(toNatural);
-  // MEDIAN FILTER
-  imgVV_VH = imgVV_VH.map(filterSpeckles);
-  
-  // RESAMPLE TO NEW PIXEL SIZE
-  imgVV_VH = imgVV_VH.map(resample);
-  
-  // CONVERT BACK TO DB
-  imgVV_VH = imgVV_VH.map(toDB);
-  
-  // MOSAIC
-  imgVV_VH = mosaicByDate(imgVV_VH);
-  
-  //RENAME BANDS
-  var collections1 = imgVV_VH
-    //.map(addDate)
-    .map(function(img){
-      var named = img.rename(['VV', 'VH']);
-        return named})
-    .map(function(image){
-      return image.set('relativeOrbit', relOrb);
-    });
-  
-  var s1_processed_collection = collections1.map(function(image){
-      return image.clip(aoi)
-    });
-  
-  /*Map.addLayer(s1_processed_collection.median().select('VH'), {min:-30, max:0}, 'S1 median 2019 VH', 0);
-  Map.addLayer(s1_processed_collection.median().select('VV'), {min:-30, max:0}, 'S1 median 2019 VV', 0);*/
-  
-  // A Sentinel-2 surface reflectance image, reflectance bands selected,
-  // serves as the source for training and prediction in this contrived example.
-  var mosaiced1 = mosaiced.filter(ee.Filter.calendarRange(7,7, 'month'));
-  var mosaiced2 = mosaiced.filter(ee.Filter.calendarRange(8,8, 'month'));
-  var mosaiced3 = mosaiced.filter(ee.Filter.calendarRange(9,9, 'month'));
-  var mosaiced4 = mosaiced.filter(ee.Filter.calendarRange(10,10, 'month'));
-  var s1_processed_collection1 = s1_processed_collection.filter(ee.Filter.calendarRange(7,7, 'month'));
-  var s1_processed_collection2 = s1_processed_collection.filter(ee.Filter.calendarRange(8,8, 'month'));
-  var s1_processed_collection3 = s1_processed_collection.filter(ee.Filter.calendarRange(9,9, 'month'));
-  var s1_processed_collection4 = s1_processed_collection.filter(ee.Filter.calendarRange(10,10, 'month'));
-  
-  var img = mosaiced.select(['B.*']).median()
-    .addBands(mosaiced.select('NDVI').median())
-    .addBands(s1_processed_collection.median());
-  
-/*  var img = mosaiced1.select(['B.*']).median()
-    .addBands(mosaiced1.select('NDVI').median())
-    .addBands(s1_processed_collection1.median())
-    .addBands(mosaiced2.select(['B.*']).median())
-    .addBands(mosaiced2.select('NDVI').median())
-    .addBands(s1_processed_collection2.median());*/
-  
-  print(img, 'training image');
-  
-  // ESA WorldCover land cover map, used as label source in classifier training.
-  var label = 'lc';
-  
-  var lc = UScotton_sieved.rename(label).toByte();
-  
-  // Add land cover as a band of the reflectance image and sample 100 pixels at
-  // 10 m scale from each land cover class within a region of interest.
-  var sample = img.addBands(lc).stratifiedSample({
-    numPoints: 200,
-    classBand: label,
-    region: aoi,
-    scale: 10,
-    geometries: true,
-    tileScale: 4
-  });
-  
-  // Add a random value field to the sample and use it to approximately split 80%
-  // of the features into a training set and 20% into a validation set.
-  sample = sample.randomColumn();
-  var trainingSample = sample.filter('random <= 0.8');
-  var validationSample = sample.filter('random > 0.8');
-  
-  print(sample, 'sample')
-  
-  // Train a 10-tree random forest classifier from the training sample.
-  var trainedClassifier = ee.Classifier.smileRandomForest(10).train({
-    features: trainingSample,
-    classProperty: label,
-    inputProperties: img.bandNames(),
-  });
-  
-  // Get information about the trained classifier.
-  print('Results of trained classifier', trainedClassifier.explain());
-  
-  // Get a confusion matrix and overall accuracy for the training sample.
-  var trainAccuracy = trainedClassifier.confusionMatrix();
-  print('Training error matrix', trainAccuracy);
-  print('Training overall accuracy', trainAccuracy.accuracy());
-  
-  // Get a confusion matrix and overall accuracy for the validation sample.
-  validationSample = validationSample.classify(trainedClassifier);
-  var validationAccuracy = validationSample.errorMatrix(label, 'classification');
-  print('Validation error matrix', validationAccuracy);
-  print('Validation accuracy', validationAccuracy.accuracy());
-  
-  // Classify the reflectance image from the trained classifier.
-  var imgClassified = img.classify(trainedClassifier).updateMask(UScotton_sieved.eq(1));
-  
-  return ee.ImageCollection([imgClassified, S2_cloud_masked.median()]);
-};
-
-var class2019 = classify(2019);
-Map.addLayer(class2019.first(), classVis, 'Classified 2019');
-Map.addLayer(ee.Image(class2019.toList(class2019.size()).get(1)), rgbVis, 'S2 SR for 2019 masked at ' + MAX_CLOUD_PROBABILITY + '%');
-
-var class2023 = classify(2023);
-Map.addLayer(class2023.first(), classVis, 'Classified 2019');
-Map.addLayer(ee.Image(class2023.toList(class2023.size()).get(1)), rgbVis, 'S2 SR for 2023 masked at ' + MAX_CLOUD_PROBABILITY + '%');
-
-var UScropland = ee.ImageCollection('USDA/NASS/CDL')
-                  .filter(ee.Filter.date(2023+'-01-01', 2023+'-12-31'))
-                  .first()
-                  .select('cropland')
-                  .clip(Missouri)
-                  .updateMask(ESAlandcover.eq(40));
-print(UScropland, 'UScropland');
-Map.addLayer(UScropland, {}, 'US cropland');
-
-// test accuracy of one year on another year
-
-Map.addLayer(aoi, {color:'white'}, 'Area of interest', false, 0.5);
+// 99 TITLE
+var title = ui.Label('Crop type classification in Missouri, United States', {
+  stretch: 'horizontal',
+  textAlign: 'center',
+  fontWeight: 'bold',
+  fontSize: '16px'
+});
+Map.add(title);
