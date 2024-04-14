@@ -21,5 +21,6 @@ The NDVI and BSI were added to Sentinel-2 optical imagery as they are indicators
 Overall validation accuracy of the classifier that did not include Sentinel-1 data was slightly better (0.86) than that of the classifier that included the microwave data (0.85), indicating that inlcuding radar backscatter intensity in cotton classification may not be helpful, keeping in mind that computation requirements increase when more data is added to the classification.
 
 
-### Literature sources
+
+## Literature sources
 Wang, N.; Zhai, Y.; Zhang, L. Automatic Cotton Mapping Using Time Series of Sentinel-2 Images. Remote Sensing 2021, 13, 1355, doi:10.3390/rs13071355.
