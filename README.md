@@ -15,10 +15,10 @@ Visualization using GIFs
 Sentinel-2 time series 2019 over the area of interest:
 ![alt text](fc21d06a2af699d6e2d07c41f9834e3d-b419cb800cf67ad120af4b61a280afe5-getPixels.gif)
 
-Sentinel-1 time series 2019 over the area of interest:
+Sentinel-1 VH time series 2019 over the area of interest:
 
 The NDVI and BSI were furthermore added to the Sentinel-2 image collection as they are indicators for plant fealth and bare soil exposure which are important factors in the annual run of an agricultural field.
 Classification including furthermore Sentinel-1 VV and VH polarization.
 
 ## Results
-Training and validation accuracy of the classifier that did not include Sentinel-1 data was slightly better () than that of the classifier that included the microwave data (), although cotton fields exhibited cotton spectral properties different to those of non-cotton fields.
+Overall validation accuracy of the classifier that did not include Sentinel-1 data was slightly better (0.86) than that of the classifier that included the microwave data (0.84).
