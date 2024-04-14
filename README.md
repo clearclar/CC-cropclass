@@ -12,7 +12,7 @@ The ESA WorldCover landcover classification was used to mask non-crop areas. The
 Within Google Earth Engine, the xy product was used to identify crop types in 2019 in a small area of interest intersecting Missouri, United States. This area contains cotton as well as other agricultural fields, with the total area of cotton fields staying relatively constant since 2001. A simple trend analysis revealed a decrease by 1.8 km^2 over the 1038.67 km^2 area of interest.
 
 Sentinel-2 time series 2019 over the area of interest:
-![alt text](fc21d06a2af699d6e2d07c41f9834e3d-b419cb800cf67ad120af4b61a280afe5-getPixels.gif)
+![alt text](e658bd0cb5f195164c26688cb51d9bd9-5e2c1ea8995a5d0f4b0a376ebdef703d-getPixels.gif)
 
 Sentinel-1 VH time series 2019 over the area of interest:
 
