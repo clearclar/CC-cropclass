@@ -34,7 +34,7 @@ var trend_chart = ui.Chart.image.series({
   scale: 30
 }).setChartType('ScatterChart')
   .setOptions({
-    title: 'Annual cotton area for the area of interest in Minnesota',
+    title: 'Annual cotton area for the area of interest in Missouri',
     vAxis: {title: 'Cotton area [sq km]'},
     hAxis: {title: 'Year'},
     pointSize: 2,
@@ -43,7 +43,7 @@ var trend_chart = ui.Chart.image.series({
 
   });
 
-print('Annual cotton area for the area of interest\nin Minnesota from 2001 to 2023', trend_chart, 'Cotton field area decreased slightly\nby around -1.8 km^2 per year');
+print('Annual cotton area for the area of interest\nin Missouri from 2001 to 2023', trend_chart, 'Cotton field area decreased slightly\nby around -1.8 km^2 per year');
 
 // Add croptype classification for 2019 and 2023 to the map.
 // Switching the layers on and off visualizes changes between the years
